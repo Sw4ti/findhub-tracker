@@ -1,5 +1,7 @@
 # Find Hub Tracker
 
+**License:** SPDX `GPL-3.0-only` · Copyright (C) 2026 Waleed Khan
+
 A self-hosted dashboard for collecting and reviewing location reports from devices in your own Google Find Hub account.
 
 > **Unofficial integration.** The Google Find Hub collector is a community project, not a Google product. Google can change its service or authentication flow at any time. This repository is an unpublished release candidate; do not treat it as a supported Google integration.
@@ -74,12 +76,8 @@ Backups are not automatically scheduled by default. Schedule the documented comm
 - [Third-party licenses](THIRD_PARTY_LICENSES.md)
 - [Changelog](CHANGELOG.md)
 - [Release notes](RELEASE_NOTES_v0.1.0-rc1.md)
-- [License recommendation (pending approval)](LICENSE_RECOMMENDATION.md)
+- [Copyright and license scope](COPYRIGHT.md)
 
-## Acknowledgements
+## License
 
-Find Hub Tracker builds on the community work in [GoogleFindMyToolsWebUi](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi) and [GoogleFindMyTools](https://github.com/leonboe1/GoogleFindMyTools). The interactive map uses [Leaflet](https://leafletjs.com/) and © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). These projects and their respective maintainers are independent of Find Hub Tracker. Google and Find Hub are Google trademarks; this project is not affiliated with or endorsed by Google.
-
-## License status
-
-The project-wide license has not been approved or finalized. The pinned collector and its patch are GPL-3.0; the source package includes their notices and license texts. Do not assume this repository grants permission to redistribute the project's original code until the maintainer approves a license. See LICENSE_RECOMMENDATION.md.
+Original Find Hub Tracker source code is **GPL-3.0-only**. Copyright (C) 2026 Waleed Khan. See [`LICENSE`](LICENSE) for the complete license text and [`COPYRIGHT.md`](COPYRIGHT.md) for scope. Third-party components remain under their own licenses; see [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md). This repository is a **v0.1.0-rc1 prerelease**; Windows first-run and live Google account compatibility remain unverified as noted above.

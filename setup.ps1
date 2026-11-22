@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 python --version

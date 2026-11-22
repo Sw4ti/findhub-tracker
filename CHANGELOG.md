@@ -9,4 +9,4 @@ Notable changes are recorded for each release.
 - Included the pinned community Google Find Hub collector, 30-minute discovery, staggered collection, dashboard, PostgreSQL, and optional Caddy configuration.
 - Added backup/restore tools, privacy scanning, installation/configuration/security guides, and synthetic tests.
 - Added no production credentials, Google account state, GPS history, device inventory, or production backups.
-- Release is not public; project-wide license approval and Windows first-run validation remain pending.
+- Release remains an unpublished prerelease; project code is GPL-3.0-only, and Windows first-run validation remains pending.

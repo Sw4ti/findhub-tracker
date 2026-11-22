@@ -1,4 +1,7 @@
 ﻿"""Internal device discovery bridge for the pinned Google Find Hub collector."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import asyncio
 import hashlib
 import hmac

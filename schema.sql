@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 CREATE TABLE IF NOT EXISTS detections (
     fingerprint text PRIMARY KEY,
     device text NOT NULL,

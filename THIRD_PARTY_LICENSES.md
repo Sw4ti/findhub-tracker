@@ -1,13 +1,13 @@
 # Third-party components and licensing notes
 
-This file is an inventory of direct runtime/build components and upstream projects. It is not legal advice. Check the precise license and notice files in each pinned source/image before redistributing an updated package.
+This file records the third-party components reviewed for the v0.1.0-rc1 source prerelease. It is not legal advice. Keep each upstream license and copyright notice intact; re-audit after changing pins or distributing built images.
 
 ## Major components
 
 | Component | Version/source | License / redistribution note |
 |---|---|---|
-| GoogleFindMyToolsWebUi collector | Git commit `8ad438190beea726228b52bc35d732ff25e7dc91`; `deploy/collector-device-deletion.patch` applies the project-specific collector changes | GPL-3.0. The Dockerfile retrieves the exact source at build time; preserve license/copyright notices and make the corresponding source and patch available with any binary/image distribution. This ZIP is source/build instructions, not a prebuilt collector image. |
-| GoogleFindMyTools | Upstream library used by the collector | GPL-3.0 per upstream repository. Confirm the exact dependency version/license in the pinned collector lockfile. |
+| GoogleFindMyToolsWebUi collector | Git commit `8ad438190beea726228b52bc35d732ff25e7dc91`; `deploy/collector-device-deletion.patch` applies the project change | Upstream GPL-3.0 with upstream copyright preserved. The build recipe retrieves this immutable commit and applies the included patch. The source tree and patch are therefore available from the pinned source link plus this repository; this release does not include a prebuilt collector image. |
+| GoogleFindMyTools | Library included by the pinned collector source | GPL-3.0 under its upstream notices; retain the pinned collector source and its notices. |
 | React / React DOM | 19.1.1 | MIT |
 | Leaflet | 1.9.4 | BSD-2-Clause |
 | Tailwind CSS / Vite plugin | 4.1.12 | MIT |
@@ -15,30 +15,37 @@ This file is an inventory of direct runtime/build components and upstream projec
 | TypeScript | 5.9.2 | Apache-2.0 |
 | FastAPI | 0.116.1 | MIT |
 | Uvicorn | 0.35.0 | BSD-3-Clause |
-| Psycopg | 3.2.9 | LGPL-3.0-or-later (review its bundled license/exception notices) |
+| Psycopg | 3.2.9 | LGPL-3.0-or-later; retain its bundled license/exception notice if redistributing installed binaries. LGPL-3.0 is compatible with GPL-3.0. |
 | HTTPX | 0.28.1 | BSD-3-Clause |
 | PyYAML | 6.0.3 | MIT |
 | argon2-cffi | 25.1.0 | MIT |
 | PostgreSQL | 17 Alpine image | PostgreSQL License; see image/source notice |
 | Caddy (optional) | 2.10 Alpine image | Apache-2.0; see image/source notice |
 | Node / Python base images | Node 22 Bookworm slim; Python 3.12 slim | Include distribution and bundled-library notices when shipping built images. This ZIP supplies source/build instructions only. |
+| Blue Oak Model License dependency family | Transitive packages in the pinned npm lockfile (platform-dependent) | Permissive notice license; preserve the upstream license text or link when redistributing the packages/bundles. The license steward states compatibility with GPLv3; see its FAQ. |
 
-The project source does not currently include a declared project-wide license file. Do not infer that source copyright is assigned or that this candidate grants broader reuse rights. Obtain the project owner's licensing decision before public redistribution. GPL components remain governed by their own licenses regardless.
+Original Find Hub Tracker code is GPL-3.0-only, Copyright (C) 2026 Waleed Khan. This does not relicense third-party material or claim its copyright. See `COPYRIGHT.md` for scope and `LICENSE` for the complete official GPL text.
 
 ## Source links
 
 - [Pinned collector source and README](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/tree/8ad438190beea726228b52bc35d732ff25e7dc91)
 - [Pinned collector LICENSE](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/blob/8ad438190beea726228b52bc35d732ff25e7dc91/LICENSE)
 - [GoogleFindMyTools repository and GPL-3.0 notice](https://github.com/leonboe1/GoogleFindMyTools)
+- [GNU GPL-3.0 text](https://www.gnu.org/licenses/gpl-3.0.html)
+- [GNU GPL compatibility guidance](https://www.gnu.org/licenses/gpl-faq.html)
+- [Blue Oak Model License FAQ](https://blueoakcouncil.org/license-faq)
+- [Blue Oak Model License text](https://blueoakcouncil.org/license/1.0.0)
 - [Docker Official Image: PostgreSQL](https://hub.docker.com/_/postgres)
 - [Caddy license](https://github.com/caddyserver/caddy/blob/master/LICENSE)
 
-The frontend lockfile pins the complete npm dependency graph. Python direct dependencies are pinned in `requirements.txt`; the collector's own locked dependencies are fetched from its pinned source commit during its image build.
+The frontend lockfile pins the complete npm dependency graph. The collector's pinned `requirements.lock` contains 80 exact Python package pins; metadata for all 80 pinned versions was checked against PyPI in this review. Direct tracker Python dependencies are pinned in `requirements.txt`. Package managers retrieve dependency source/binaries at install/build time; dependencies are not copied into this source ZIP.
 
-The `licenses/` directory contains the full GPL-3.0 license texts retrieved from the pinned collector and its upstream library. Collector source is cloned from the pinned public commit during build rather than redistributed as a prebuilt image in this ZIP; the included patch and source URL/commit are part of the build recipe. Before sharing a built image or a modified collector outside this private candidate, verify current GPL corresponding-source and notice obligations and provide the exact patched source.
+The `licenses/` directory preserves the full GPL-3.0 texts supplied by the pinned collector and upstream library. The collector source is cloned from the exact public commit during image build, and the included patch reconstructs the modified collector source. GNU GPLv3 requires preserving notices and making corresponding source available when conveying covered binaries; if publishing a built image, provide the exact patched source and all applicable build/license notices. The current source ZIP itself does not contain built images.
 
-## Lockfile scan notes
+## Compatibility review (v0.1.0-rc1)
 
-The installed locked npm dependency tree reported declared licenses in these families: MIT (majority), ISC, Blue Oak Model License 1.0.0, Apache-2.0, BSD-2-Clause, BSD-3-Clause and MPL-2.0, with no undeclared license among the platform-installed packages. Platform-specific optional packages are selected by npm on the friend's OS during `npm ci`; this was not a platform-by-platform license audit.
+The pinned collector's 80 Python dependency versions all returned license metadata from PyPI. Reviewed families include MIT, BSD, Apache-2.0, PSF, MPL-2.0, LGPL-2.1-or-later, GPL-3.0, wxWindows Library Licence 3.1, and dual/permissive notices. `python-dateutil` declares Apache or BSD; `pycryptodomex` declares BSD or public domain; each provides a permissive option. The GPL-3.0 package is compatible with the project license. GNU identifies LGPL-2.1, LGPL-3.0, Apache-2.0, compatible MPL versions, and wxWindows Library License as GPLv3-compatible. The Blue Oak license steward states GPLv3 compatibility; its notice requirement and license text are linked above.
 
-Direct Python runtime metadata reports FastAPI MIT, Uvicorn BSD-3-Clause, Psycopg LGPLv3, HTTPX BSD-3-Clause, PyYAML MIT, and argon2-cffi MIT. Transitive Python and collector dependencies remain governed by their respective pinned package metadata/license files. Review bundled notices for the target platform before redistribution of built images.
+The complete locked npm graph (124 package/version entries, including optional platform packages) has license metadata for all entries. Families include MIT, ISC, 0BSD, Blue Oak Model 1.0.0, Apache-2.0, BSD-2/3-Clause, and MPL-2.0. Blue Oak Model License 1.0.0 is described by its license steward as GPLv3-compatible; preserve its required text or link when redistributing packages. The source release does not bundle `node_modules`; optional platform packages are downloaded by npm. The source-only package contains no prebuilt container images or dependency binaries, so base-image OS package notices are not part of this ZIP.
+
+No license incompatibility was identified in this source/build configuration review. This is a documented technical review, not legal advice or a guarantee about every future platform-specific build. Re-run a lockfile/license scan and provide corresponding-source notices before distributing any built image or changing dependency pins.

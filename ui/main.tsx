@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Waleed Khan
+
 import React, { FormEvent, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import L from 'leaflet'

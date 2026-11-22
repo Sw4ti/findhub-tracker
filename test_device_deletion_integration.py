@@ -1,4 +1,7 @@
 """Integration tests for deletion against an isolated PostgreSQL and collector."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta

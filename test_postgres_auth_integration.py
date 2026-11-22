@@ -1,4 +1,7 @@
 """Real-PostgreSQL auth integration tests; run only in isolated QA Compose."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import os
 import secrets
 import unittest

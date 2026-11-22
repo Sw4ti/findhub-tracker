@@ -1,4 +1,7 @@
 """Synthetic-only tests for Find Hub device discovery and registration."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import os
 import secrets
 import unittest

@@ -1,4 +1,7 @@
 """Runtime smoke tests enabled only in the isolated release QA Compose project."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import os
 import unittest
 from datetime import UTC, datetime

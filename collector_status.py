@@ -1,4 +1,7 @@
 """Publish an allowlisted snapshot of the pinned collector's local poll state."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import json
 import os
 import re

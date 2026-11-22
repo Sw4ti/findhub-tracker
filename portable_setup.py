@@ -1,4 +1,7 @@
 """Create a fresh local .env for an independent Find Hub Tracker installation."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import argparse
 import os
 import re

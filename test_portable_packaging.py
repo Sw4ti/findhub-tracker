@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import hashlib
 import importlib.util
 import io
@@ -201,6 +204,15 @@ class PortablePackageTests(unittest.TestCase):
         for sample in samples:
             self.assertIsNotNone(privacy.check_content("sample.txt", sample))
         self.assertIsNone(privacy.check_content("example.txt", b"127.0.0.1 and 10.0.0.2"))
+
+    def test_release_privacy_scanner_ignores_its_generated_release_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = Path(temporary) / "release-artifacts"
+            artifacts.mkdir()
+            marker = "account.example." + "duckdns.org"
+            (artifacts / "scan-input.txt").write_text(marker, encoding="utf-8")
+            with patch("sys.stdout", new=io.StringIO()):
+                self.assertEqual(privacy.scan(Path(temporary)), 0)
 
 
 if __name__ == "__main__":

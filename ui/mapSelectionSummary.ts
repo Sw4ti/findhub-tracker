@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Waleed Khan
+
 export type SummaryDevice = { device: string; label: string }
 
 export type MapSelectionSummary = {

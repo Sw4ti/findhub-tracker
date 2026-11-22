@@ -4,6 +4,9 @@ Run inside the isolated Find Hub Tracker discovery service. The command takes
 only a private checkpoint basename under DELETION_BACKUP_DIR; it accepts no
 browser-supplied path or SQL.
 """
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import argparse
 import json
 import re

@@ -1,4 +1,7 @@
 """Reject personal/runtime secrets from a portable candidate directory or ZIP."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import argparse
 import ipaddress
 from pathlib import Path, PurePosixPath
@@ -21,7 +24,7 @@ PRIVATE_TEXT_PATTERNS = [
 ]
 IPV4 = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 SECRET_ASSIGNMENT = re.compile(rb"(?im)^\s*(?:DB_PASSWORD|SESSION_KEY|INGEST_KEY|COLLECTOR_PASSWORD|COLLECTOR_KEY)\s*=\s*[^\r\n]+")
-GENERATED_DIRS = {".git", "node_modules", "dist", "__pycache__", ".venv", "qa-artifacts", "backups"}
+GENERATED_DIRS = {".git", "node_modules", "dist", "__pycache__", ".venv", "qa-artifacts", "backups", "release-artifacts"}
 
 
 def forbidden_name(name):

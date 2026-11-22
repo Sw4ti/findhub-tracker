@@ -6,11 +6,26 @@ backups/
 logs/
 secrets/
 rollbacks/
+private-config.*
+collector-config.yaml
+collector-config.yml
+credentials.json
+client_secret*.json
+*.token
+*.tokens
+*.cookie
+*.cookies
+*.pem
+*.key
+*.p12
+*.pfx
 *.dump
 *.sqlite
 *.sqlite3
 *.db
 *.tar.gz
+*.backup
+*.backup.*
 *.zip
 
 # Collector account state
@@ -30,6 +45,7 @@ coverage/
 venv/
 qa-artifacts/
 release-candidates/
+release-artifacts/
 
 # Editor and OS files
 .DS_Store

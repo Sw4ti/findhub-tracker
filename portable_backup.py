@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 from __future__ import annotations
 
 """Create, verify, and restore portable snapshots without touching other projects.

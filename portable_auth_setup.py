@@ -1,4 +1,7 @@
 """Initialize or restore the dashboard Argon2id hash in its private Docker volume."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import argparse
 import getpass
 import os

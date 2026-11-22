@@ -4,6 +4,9 @@ The HTTP and database adapters live in tracker.py/device_discovery.py. Keeping
 eligibility and checkpoint validation pure makes the destructive gates easy to
 exercise with synthetic records.
 """
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 from __future__ import annotations
 
 import hashlib

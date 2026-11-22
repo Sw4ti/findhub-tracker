@@ -1,4 +1,7 @@
 """Synthetic-only tests for fail-closed permanent-device deletion primitives."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path

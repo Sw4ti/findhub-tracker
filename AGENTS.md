@@ -1,29 +1,27 @@
-# Repository instructions for Codex and contributors
+# Repository instructions for contributors and Codex
 
 ## Before changing files
-- Read this file, `README.md`, `CHANGELOG.md`, and the relevant design/security documentation.
-- Treat this repository as an independently installable project. Never copy files from a live installation or production workspace.
-- Keep credentials, password hashes, Google session state, device identifiers, location history, database files, backup archives, SSH keys, and personal infrastructure details out of source, tests, screenshots, and Git history.
-- Use synthetic devices, names, dates, coordinates, and credentials in tests and screenshots.
-- Keep `.env.example` limited to placeholders. Do not commit `.env` files.
+- Read this file, `README.md`, `CHANGELOG.md`, and relevant security/configuration documentation.
+- Treat this as an independently installed project. Never copy a live installation or production workspace into the repository.
+- Keep passwords, hashes, Google session state, device identifiers, GPS history, database files, backup archives, SSH keys, and personal infrastructure details out of source, tests, screenshots, and Git history.
+- Use synthetic names, dates, coordinates, and credentials in tests and screenshots. Keep `.env.example` placeholder-only; never commit `.env`.
 
-## Development and testing
-- Use the pinned dependency lockfiles. Python host setup helpers require Python 3.11 or newer; containers use their pinned base images.
-- Run `npm ci`, `npm run build`, `node --test test_map_selection_summary.cjs`, and the documented Python tests relevant to your changes.
-- Run PostgreSQL integration tests only against an isolated test database/Compose project with synthetic credentials and data. Never point tests at a user's installation.
-- Validate Compose files with example-only environment values. Do not start, stop, or reconfigure another user's Docker projects.
-- Run `python release_privacy_scan.py .` before staging. Review the full `git diff --cached --check` and staged file list before committing.
-- Document tests, known limitations, configuration changes, and security impact in the relevant documentation and `CHANGELOG.md`.
+## Development checks
+- Host setup tools require Python 3.11 or newer; use pinned dependency manifests.
+- Run `npm ci`, `npm run build`, `node --test test_map_selection_summary.cjs`, and relevant Python tests.
+- Run PostgreSQL integration tests only against an isolated test database/Compose project with synthetic data and credentials.
+- Validate Compose using example values; do not start, stop, or change another user's Docker project.
+- Run `python release_privacy_scan.py .`, `git diff --cached --check`, and inspect the full staged path list/diff before every commit.
+- Update documentation and `CHANGELOG.md` for functional, setup, security, or compatibility changes.
 
 ## Security and project boundaries
-- Google Find Hub support is unofficial. Do not bypass Google authentication, encrypted-location confirmation, or rate limits.
-- Do not weaken session, CSRF, collector bearer authentication, owner authorization, backup, or device deletion protections.
-- Never include real account material, live GPS data, production configuration, or private server details in examples.
-- Do not add dependencies or expose network ports without documenting the reason and threat impact.
+- Google Find Hub integration is unofficial. Never bypass Google authentication, encrypted-location confirmation, or rate limits.
+- Do not weaken session, CSRF, collector bearer authentication, owner authorization, backup, or deletion safeguards.
+- Keep third-party copyrights, SPDX notices, license texts, and attribution intact. Original first-party code is GPL-3.0-only; third-party components retain their own terms.
+- Do not add dependencies, ports, or privileged container access without documenting rationale and security impact.
 
 ## GitHub publishing
-- Check `gh auth status` and confirm the account and target repository before GitHub operations.
-- The repository-wide license is pending maintainer approval. Do not add or infer a `LICENSE` until the owner approves the license and copyright notice.
-- Do not push, publish a release, force-push, delete branches, or trigger deployment unless the owner explicitly approves that exact action.
-- Prefer a feature branch and pull request for future changes. Never configure GitHub changes to auto-deploy to a personal production Mini PC.
-- Before every commit, run tests, the privacy scan, `git diff --cached --check`, and inspect every staged path and diff. Use a concise, meaningful commit message.
+- Confirm `gh auth status`, account, and repository before GitHub operations.
+- Never push, publish a release, force-push, delete branches, or trigger deployments without explicit owner authorization.
+- Prefer feature branches and pull requests for future changes. GitHub changes must never auto-deploy to a personal production Mini PC.
+- Before committing: run relevant tests and privacy scan, inspect staged paths and diff, and use a focused commit message.

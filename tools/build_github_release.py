@@ -1,4 +1,7 @@
 """Build a deterministic source ZIP from the Git-tracked release workspace."""
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Waleed Khan
+
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 INVENTORY = ROOT / "PACKAGE_INVENTORY.txt"
-OUTPUT_DIR = ROOT.parent
+OUTPUT_DIR = ROOT / "release-artifacts"
 RELEASE_NAME = f"findhub-tracker-{VERSION}"
 
 
