@@ -1,0 +1,850 @@
+diff --git a/tests/test_device_store.py b/tests/test_device_store.py
+index c2d8c2f..ac3a162 100644
+--- a/tests/test_device_store.py
++++ b/tests/test_device_store.py
+@@ -177,6 +177,29 @@ def test_mutate_device_creates_entry(monkeypatch, tmp_path):
+     assert result["x"] == 1
+ 
+ 
++def test_delete_device_removes_only_complete_target_entry(monkeypatch, tmp_path):
++    import webui.demo_mode as demo_mode
++    path = tmp_path / "devices.yaml"
++    write_yaml_dict(path, {"schema_version": 1, "devices": {
++        "synthetic-target": {"config": {"display_name": "Synthetic"},
++                             "location": {"locations": [{"latitude": 1}]},
++                             "endpoint_state": {"url": {"last_forward_status": "ok"}},
++                             "staleness": {"enabled": True}},
++        "synthetic-other": {"config": {"display_name": "Other"},
++                            "location": {"locations": [{"latitude": 2}]},
++                            "endpoint_state": {"url": {"last_forward_status": "ok"}}},
++    }})
++    monkeypatch.setattr(config, "DEVICES_PATH", path)
++    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
++    monkeypatch.setattr(demo_mode, "DEMO_MODE", False)
++    removed = device_store.delete_device("synthetic-target")
++    assert removed["location"]["locations"] == [{"latitude": 1}]
++    assert path.stat().st_mode & 0o777 == 0o600
++    saved = device_store.load()["devices"]
++    assert set(saved) == {"synthetic-other"}
++    assert saved["synthetic-other"]["location"]["locations"] == [{"latitude": 2}]
++
++
+ def test_mutate_device_updates_entry(monkeypatch, tmp_path):
+     """mutate_device updates existing entry."""
+     monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+@@ -226,4 +249,4 @@ def test_mutate_devices_removes_empty_entries(monkeypatch, tmp_path):
+     # id1 should be gone
+     data = device_store.load()
+     assert "id1" not in data["devices"]
+-    assert "id2" in data["devices"]
+\ No newline at end of file
++    assert "id2" in data["devices"]
+diff --git a/tests/test_scheduler.py b/tests/test_scheduler.py
+index 8ef32d4..b9aab59 100644
+--- a/tests/test_scheduler.py
++++ b/tests/test_scheduler.py
+@@ -12,6 +12,73 @@ from webui import scheduler
+ from webui.forwarders import policy
+ 
+ 
++def test_delete_fence_waits_for_in_flight_device_operation(monkeypatch):
++    async def scenario():
++        monkeypatch.setattr(scheduler, "_deleted_devices", set())
++        monkeypatch.setattr(scheduler, "_tasks", {})
++        monkeypatch.setattr(scheduler.device_store, "load", lambda: {"devices": {"synthetic": {"config": {}}}})
++        monkeypatch.setattr(scheduler.log_store, "device_entries", lambda _device: {"active": [], "legacy": []})
++        entered = asyncio.Event()
++        release = asyncio.Event()
++
++        async def active_operation():
++            async with scheduler.device_operation("synthetic"):
++                entered.set()
++                await release.wait()
++
++        active = asyncio.create_task(active_operation())
++        await entered.wait()
++        deleting = asyncio.create_task(scheduler.prepare_device_deletion("synthetic"))
++        await asyncio.sleep(0)
++        assert scheduler.is_device_deleted("synthetic")
++        assert not deleting.done()
++        rejected = False
++        try:
++            async with scheduler.device_operation("synthetic"):
++                pass
++        except RuntimeError:
++            rejected = True
++        assert rejected
++        release.set()
++        await active
++        _entry, lock = await deleting
++        assert lock.locked()
++        lock.release()
++
++    asyncio.run(scenario())
++
++
++def test_cancelled_scheduled_forward_waits_for_started_thread():
++    import threading
++
++    async def scenario():
++        started = threading.Event()
++        release = threading.Event()
++
++        def blocking_send():
++            started.set()
++            release.wait(timeout=5)
++            return "finished"
++
++        task = asyncio.create_task(scheduler._uncancellable_thread(blocking_send))
++        for _ in range(100):
++            if started.is_set():
++                break
++            await asyncio.sleep(0.01)
++        assert started.is_set()
++        task.cancel()
++        await asyncio.sleep(0.02)
++        assert not task.done()
++        release.set()
++        try:
++            await task
++            assert False, "cancelled work must re-raise cancellation after the send finishes"
++        except asyncio.CancelledError:
++            pass
++
++    asyncio.run(scenario())
++
++
+ def test_next_run_computes_next_cron_occurrence():
+     base = datetime(2026, 8, 6, 12, 0, 0)
+     assert scheduler._next_run("*/5 * * * *", base) == datetime(2026, 8, 6, 12, 5, 0)
+diff --git a/webui/device_store.py b/webui/device_store.py
+index a35ec02..4275e08 100644
+--- a/webui/device_store.py
++++ b/webui/device_store.py
+@@ -181,6 +181,18 @@ def mutate_device(canonic_id: str, fn: Callable[[dict], None]) -> dict:
+         return entry
+ 
+ 
++def delete_device(canonic_id: str) -> dict | None:
++    """Atomically remove a device's complete config, cached locations and runtime state."""
++    if demo_mode.is_demo_mode():
++        return None
++    with _lock:
++        data = _load_unlocked()
++        entry = data.setdefault("devices", {}).pop(canonic_id, None)
++        if entry is not None:
++            _save_unlocked(data)
++        return copy.deepcopy(entry) if entry is not None else None
++
++
+ def mutate_devices(fn: Callable[[dict], None]) -> dict:
+     """Like mutate_device, but fn gets the whole devices dict to mutate
+     directly, in one locked read-modify-write pass - for operations that
+diff --git a/webui/forwarders/log_store.py b/webui/forwarders/log_store.py
+index 1bc7438..803fa13 100644
+--- a/webui/forwarders/log_store.py
++++ b/webui/forwarders/log_store.py
+@@ -1,4 +1,5 @@
+ import json
++import os
+ import re
+ import threading
+ import time
+@@ -123,6 +124,95 @@ def append(
+         append_line(config.FORWARD_LOG_PATH, entry, _format_line, _parse_line, config.FORWARD_LOG_MAX_ENTRIES)
+ 
+ 
++def device_entries(canonic_id: str) -> dict:
++    """Snapshot all per-device forwarding log records before destructive cleanup."""
++    if demo_mode.is_demo_mode():
++        return {"active": [], "legacy": []}
++    with _lock:
++        active = [entry for entry in _read_all() if entry.get("canonic_id") == canonic_id]
++        legacy_entries = []
++        path = config.FORWARD_LOG_LEGACY_JSON_PATH
++        if path.is_file() and not path.is_symlink():
++            try:
++                with path.open(encoding="utf-8") as stream:
++                    data = json.load(stream)
++                entries = data.get("entries") if isinstance(data, dict) else None
++                if isinstance(entries, list):
++                    legacy_entries = [entry for entry in entries if isinstance(entry, dict)
++                                      and entry.get("canonic_id") == canonic_id]
++            except (OSError, json.JSONDecodeError):
++                raise RuntimeError("Legacy forwarding history could not be read safely")
++        return {"active": active, "legacy": legacy_entries}
++
++
++def remove_device(canonic_id: str) -> int:
++    """Atomically remove a device's log entries from active and legacy files."""
++    if demo_mode.is_demo_mode():
++        return 0
++    with _lock:
++        entries = _read_all()
++        kept = [entry for entry in entries if entry.get("canonic_id") != canonic_id]
++        removed = len(entries) - len(kept)
++        if removed:
++            _write_all(kept)
++        legacy = config.FORWARD_LOG_LEGACY_JSON_PATH
++        if legacy.is_file() and not legacy.is_symlink():
++            try:
++                with legacy.open(encoding="utf-8") as stream:
++                    old = json.load(stream)
++                old_entries = old.get("entries") if isinstance(old, dict) else None
++                if isinstance(old_entries, list):
++                    retained = [entry for entry in old_entries
++                                if not isinstance(entry, dict) or entry.get("canonic_id") != canonic_id]
++                    if len(retained) != len(old_entries):
++                        old["entries"] = retained
++                        temporary = legacy.with_suffix(legacy.suffix + ".tmp")
++                        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
++                        with os.fdopen(fd, "w", encoding="utf-8") as stream:
++                            json.dump(old, stream, separators=(",", ":"))
++                            stream.flush()
++                            os.fsync(stream.fileno())
++                        os.replace(temporary, legacy)
++                        os.chmod(legacy, 0o600)
++                        removed += len(old_entries) - len(retained)
++            except (OSError, json.JSONDecodeError):
++                raise RuntimeError("Legacy forwarding history could not be safely cleaned")
++        return removed
++
++
++def restore_device(canonic_id: str, snapshots: dict):
++    """Restore saved log records after a failed cross-service deletion."""
++    if demo_mode.is_demo_mode():
++        return
++    if not isinstance(snapshots, dict):
++        raise ValueError("Forwarding-log recovery state is invalid")
++    with _lock:
++        active = snapshots.get("active", [])
++        entries = _read_all()
++        entries = [entry for entry in entries if entry.get("canonic_id") != canonic_id]
++        entries.extend(entry for entry in active if isinstance(entry, dict) and entry.get("canonic_id") == canonic_id)
++        _write_all(sorted(entries, key=lambda item: item.get("time", 0)))
++        legacy_entries = snapshots.get("legacy", [])
++        path = config.FORWARD_LOG_LEGACY_JSON_PATH
++        if legacy_entries and path.is_file() and not path.is_symlink():
++            with path.open(encoding="utf-8") as stream:
++                old = json.load(stream)
++            current = old.get("entries") if isinstance(old, dict) else None
++            if not isinstance(current, list):
++                raise RuntimeError("Legacy forwarding log has an unsupported structure")
++            current = [entry for entry in current
++                       if not isinstance(entry, dict) or entry.get("canonic_id") != canonic_id]
++            old["entries"] = current + [entry for entry in legacy_entries
++                                        if isinstance(entry, dict) and entry.get("canonic_id") == canonic_id]
++            temporary = path.with_suffix(path.suffix + ".tmp")
++            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
++            with os.fdopen(fd, "w", encoding="utf-8") as stream:
++                json.dump(old, stream, separators=(",", ":"))
++                stream.flush()
++                os.fsync(stream.fileno())
++            os.replace(temporary, path)
++            os.chmod(path, 0o600)
++
+ def recent_entries(limit: int = 500) -> list[dict]:
+     """Newest first."""
+     if demo_mode.is_demo_mode():
+diff --git a/webui/forwarders/settings_service.py b/webui/forwarders/settings_service.py
+index a23740b..bbfd5ad 100644
+--- a/webui/forwarders/settings_service.py
++++ b/webui/forwarders/settings_service.py
+@@ -105,9 +105,19 @@ async def rows(overrides: dict[str, dict] | None = None, saved_id: str | None =
+                 # talks to Google's API itself, so this is the only place
+                 # {{device_name}}/{{manufacturer}}/etc. get their values from
+                 # at forward time.
+-                device_cfg = dict(device_cfg, google_name=google_name, device_meta=device_meta)
+-                config_store.set_device_config(canonic_id, device_cfg)
+-                devices[canonic_id] = device_cfg
++                from webui import scheduler
++                if not scheduler.is_device_deleted(canonic_id):
++                    try:
++                        async with scheduler.device_operation(canonic_id):
++                            latest = config_store.get_device_config(canonic_id)
++                            if latest is not None:
++                                device_cfg = dict(latest, google_name=google_name, device_meta=device_meta)
++                                config_store.set_device_config(canonic_id, device_cfg)
++                                devices[canonic_id] = device_cfg
++                    except RuntimeError:
++                        # A concurrent deletion owns this ID; rendering the
++                        # stale, read-only row must not recreate its config.
++                        pass
+         save_error = None
+         if overrides and canonic_id in overrides:
+             device_cfg = overrides[canonic_id]["config"]
+diff --git a/webui/locate_coalescer.py b/webui/locate_coalescer.py
+index 58b376e..15fa7a9 100644
+--- a/webui/locate_coalescer.py
++++ b/webui/locate_coalescer.py
+@@ -61,4 +61,16 @@ class LocateCoalescer:
+         return await asyncio.shield(task)
+ 
+ 
++    async def cancel(self, key: str):
++        task = self._inflight.get(key)
++        if task is not None:
++            task.cancel()
++            try:
++                await task
++            except BaseException:
++                pass
++            if self._inflight.get(key) is task:
++                self._inflight.pop(key, None)
++
++
+ locate_coalescer = LocateCoalescer()
+diff --git a/webui/main.py b/webui/main.py
+index d9ca032..25fa446 100644
+--- a/webui/main.py
++++ b/webui/main.py
+@@ -30,6 +30,7 @@ from webui.routers import (
+     debug_export,
+     devices,
+     firmware,
++    findhub_deletion,
+     locate,
+     logs,
+     metrics,
+@@ -62,6 +63,8 @@ async def lifespan(app: FastAPI):
+     staleness_task = None
+     eid_upload_task = None
+     if not demo_mode.is_demo_mode():
++        # Recover persistent deletion fences before starting scheduled work.
++        scheduler.load_pending_deletions()
+         # Nothing legitimate to poll in demo mode - every device is fake and
+         # nothing is ever actually persisted (see webui/device_store.py) -
+         # and skipping both avoids a poll/sweep loop ticking forever against
+@@ -102,6 +105,7 @@ app.include_router(locate.router)
+ app.include_router(sound.router)
+ app.include_router(register.router)
+ app.include_router(firmware.router)
++app.include_router(findhub_deletion.router)
+ app.include_router(auth.router)
+ app.include_router(debug_export.router)
+ app.include_router(settings.router)
+diff --git a/webui/routers/findhub_deletion.py b/webui/routers/findhub_deletion.py
+new file mode 100644
+index 0000000..90d5c6f
+--- /dev/null
++++ b/webui/routers/findhub_deletion.py
+@@ -0,0 +1,160 @@
++"""Internal tracker-only deletion bridge; never exposed through the dashboard."""
++import hmac
++import json
++import os
++import re
++import uuid
++from pathlib import Path
++
++from fastapi import APIRouter, Header, HTTPException
++from pydantic import BaseModel, Field
++
++from webui import config, scheduler
++
++router = APIRouter(prefix="/internal/tracker/devices")
++_TOKEN = os.environ.get("FINDHUB_DELETION_TOKEN", "")
++
++class Operation(BaseModel):
++    operation_id: str = Field(min_length=36, max_length=36)
++
++class RestoreOperation(Operation):
++    entry: dict | None = None
++
++def _authorized(value: str):
++    if not _TOKEN or not hmac.compare_digest(value, _TOKEN):
++        raise HTTPException(401, "Unauthorized")
++
++def _operation(value: str) -> str:
++    try:
++        return str(uuid.UUID(value))
++    except (ValueError, AttributeError) as error:
++        raise HTTPException(422, "Invalid operation identifier") from error
++
++def _device(value: str) -> str:
++    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", value):
++        raise HTTPException(422, "Invalid stable device identifier")
++    return value
++
++def _journal_dir() -> Path:
++    root = config.DATA_DIR / ".findhub-device-deletion"
++    root.mkdir(mode=0o700, parents=True, exist_ok=True)
++    os.chmod(root, 0o700)
++    return root
++
++def _journal_path(op: str) -> Path:
++    return _journal_dir() / (op + ".json")
++
++def _write_journal(op: str, device: str, entry: dict):
++    target = _journal_path(op)
++    if target.exists() or target.is_symlink():
++        with target.open(encoding="utf-8") as stream:
++            saved = json.load(stream)
++        if saved.get("device_id") != device:
++            raise RuntimeError("Deletion journal identity mismatch")
++        return saved["entry"]
++    temp = target.with_suffix(".tmp")
++    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
++    try:
++        with os.fdopen(fd, "w", encoding="utf-8") as stream:
++            json.dump({"operation_id": op, "device_id": device, "entry": entry}, stream,
++                      separators=(",", ":"), sort_keys=True)
++            stream.flush()
++            os.fsync(stream.fileno())
++        os.replace(temp, target)
++        os.chmod(target, 0o600)
++        dirfd = os.open(target.parent, os.O_RDONLY)
++        try:
++            os.fsync(dirfd)
++        finally:
++            os.close(dirfd)
++        return entry
++    finally:
++        try:
++            temp.unlink()
++        except FileNotFoundError:
++            pass
++
++def _read_journal(op: str, device: str) -> dict | None:
++    path = _journal_path(op)
++    if not path.exists():
++        return None
++    if path.is_symlink() or path.stat().st_mode & 0o077:
++        raise RuntimeError("Deletion journal permissions are unsafe")
++    with path.open(encoding="utf-8") as stream:
++        data = json.load(stream)
++    if data.get("operation_id") != op or data.get("device_id") != device or not isinstance(data.get("entry"), dict):
++        raise RuntimeError("Deletion journal is invalid")
++    return data["entry"]
++
++@router.post("/{canonic_id}/prepare")
++async def prepare(canonic_id: str, body: Operation, authorization: str = Header(default="", alias="X-FindHub-Deletion-Token")):
++    _authorized(authorization)
++    device = _device(canonic_id)
++    op = _operation(body.operation_id)
++    try:
++        entry, lock = await scheduler.prepare_device_deletion(device)
++    except LookupError as error:
++        raise HTTPException(409, "Collector device state is unavailable") from error
++    try:
++        entry = _write_journal(op, device, entry)
++    except Exception as error:
++        try:
++            scheduler.restore_device_state(device, entry)
++            _journal_path(op).unlink(missing_ok=True)
++        except Exception as recovery_error:
++            raise HTTPException(503, "Collector deletion needs recovery; the device remains fenced") from recovery_error
++        raise HTTPException(503, "Collector state could not be removed safely") from error
++    finally:
++        lock.release()
++    return {"operation_id": op, "device_id": device, "entry": entry}
++
++@router.post("/{canonic_id}/delete")
++async def delete(canonic_id: str, body: Operation, authorization: str = Header(default="", alias="X-FindHub-Deletion-Token")):
++    _authorized(authorization)
++    device = _device(canonic_id)
++    op = _operation(body.operation_id)
++    entry = _read_journal(op, device)
++    if not isinstance(entry, dict):
++        raise HTTPException(409, "A verified recovery checkpoint must be prepared first")
++    try:
++        _current, lock = await scheduler.prepare_device_deletion(device)
++    except LookupError as error:
++        raise HTTPException(409, "Collector device state is unavailable") from error
++    try:
++        scheduler.commit_prepared_device_deletion(device, lock)
++    except Exception as error:
++        raise HTTPException(503, "Collector state could not be removed safely") from error
++    finally:
++        lock.release()
++    await scheduler.ws.manager.broadcast({"type": "device_removed", "canonic_id": device})
++    return {"operation_id": op, "device_id": device, "entry": entry}
++
++@router.post("/{canonic_id}/restore")
++async def restore(canonic_id: str, body: RestoreOperation, authorization: str = Header(default="", alias="X-FindHub-Deletion-Token")):
++    _authorized(authorization)
++    device = _device(canonic_id)
++    op = _operation(body.operation_id)
++    entry = body.entry or _read_journal(op, device)
++    if not isinstance(entry, dict) or not isinstance(entry.get("device_state"), dict):
++        raise HTTPException(409, "No recoverable collector deletion state exists")
++    scheduler.restore_device_state(device, entry)
++    _journal_path(op).unlink(missing_ok=True)
++    return {"operation_id": op, "device_id": device, "restored": True}
++
++@router.post("/{canonic_id}/commit")
++async def commit(canonic_id: str, body: Operation, authorization: str = Header(default="", alias="X-FindHub-Deletion-Token")):
++    _authorized(authorization)
++    device = _device(canonic_id)
++    op = _operation(body.operation_id)
++    path = _journal_path(op)
++    if path.exists():
++        _read_journal(op, device)
++        path.unlink()
++    return {"operation_id": op, "device_id": device, "committed": True}
++
++@router.post("/{canonic_id}/revive")
++async def revive(canonic_id: str, authorization: str = Header(default="", alias="X-FindHub-Deletion-Token")):
++    _authorized(authorization)
++    device = _device(canonic_id)
++    scheduler.revive_device(device)
++    return {"device_id": device, "revived": True}
+diff --git a/webui/routers/locate.py b/webui/routers/locate.py
+index c84a822..9e081a1 100644
+--- a/webui/routers/locate.py
++++ b/webui/routers/locate.py
+@@ -3,7 +3,7 @@ import time
+ 
+ from fastapi import APIRouter, Request
+ 
+-from webui import device_location_store
++from webui import device_location_store, scheduler
+ from webui.deps import locate_device
+ from webui.forwarders import config_store
+ from webui.templating import templates
+@@ -15,7 +15,7 @@ router = APIRouter()
+ 
+ 
+ @router.post("/devices/{canonic_id}/locate")
+-async def locate(request: Request, canonic_id: str, name: str = ""):
++async def _locate_unlocked(request: Request, canonic_id: str, name: str = ""):
+     display_name = name or canonic_id
+     device_cfg = config_store.get_device_config(canonic_id)
+     alias = device_cfg.get("display_name") if device_cfg else None
+@@ -78,3 +78,13 @@ async def locate(request: Request, canonic_id: str, name: str = ""):
+         "fetched_at_str": fetched_at_str,
+         "oob_swaps": oob_swaps,
+     })
++
++
++@router.post("/devices/{canonic_id}/locate")
++async def locate(request: Request, canonic_id: str, name: str = ""):
++    try:
++        async with scheduler.device_operation(canonic_id):
++            return await _locate_unlocked(request, canonic_id, name)
++    except RuntimeError:
++        from fastapi import HTTPException
++        raise HTTPException(409, "Device deletion is in progress or complete")
+diff --git a/webui/routers/settings.py b/webui/routers/settings.py
+index ec32bc9..1d6a0fe 100644
+--- a/webui/routers/settings.py
++++ b/webui/routers/settings.py
+@@ -119,6 +119,9 @@ async def device_form_preview_route(request: Request, canonic_id: str, yaml_text
+ @router.post("/settings/devices/{canonic_id}/yaml")
+ @login_required
+ async def save_device_yaml_route(request: Request, canonic_id: str, yaml_text: str = Form(...)):
++    from webui import scheduler
++    if scheduler.is_device_deleted(canonic_id):
++        raise HTTPException(409, "Device deletion is in progress or complete")
+     row = await settings_service.row(canonic_id)
+     endpoints, display_name, error = settings_service.from_yaml_doc(yaml_text)
+ 
+@@ -153,11 +156,14 @@ async def save_device_yaml_route(request: Request, canonic_id: str, yaml_text: s
+         device_cfg["device_meta"] = existing["device_meta"]
+ 
+     try:
+-        config_store.set_device_config(canonic_id, device_cfg)
+-        scheduler.restart_device(canonic_id)
++        async with scheduler.device_operation(canonic_id):
++            config_store.set_device_config(canonic_id, device_cfg)
++            scheduler.restart_device(canonic_id)
++            latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
++    except RuntimeError:
++        raise HTTPException(409, "Device deletion is in progress or complete")
+     except Exception as e:
+-        return _error(f"Failed to save: {e}")
+-    latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
++        return _error(f"Failed to save: {type(e).__name__}")
+ 
+     # In demo mode set_device_config() was a no-op - echo back what was just
+     # typed instead of re-reading the fixed seed.
+@@ -230,6 +236,8 @@ async def update_device_settings(
+     canonic_id: str,
+     display_name: str = Form(""),
+ ):
++    if scheduler.is_device_deleted(canonic_id):
++        raise HTTPException(409, "Device deletion is in progress or complete")
+     form = await request.form()
+     existing = config_store.get_device_config(canonic_id) or {"endpoints": []}
+     endpoints, errors = settings_service.parse_endpoints_form(form, existing.get("endpoints", []))
+@@ -247,12 +255,13 @@ async def update_device_settings(
+         return _form_response(request, row)
+ 
+     try:
+-        config_store.set_device_config(canonic_id, device_cfg)
+-        scheduler.restart_device(canonic_id)
++        async with scheduler.device_operation(canonic_id):
++            config_store.set_device_config(canonic_id, device_cfg)
++            scheduler.restart_device(canonic_id)
++            latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
+     except Exception as e:
+         row = await settings_service.row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": f"Failed to save: {e}"}})
+         return _form_response(request, row)
+-    latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
+ 
+     # In demo mode set_device_config() was a no-op - echo back what was just
+     # typed instead of re-reading the fixed seed.
+diff --git a/webui/scheduler.py b/webui/scheduler.py
+index 10931ab..d0387c8 100644
+--- a/webui/scheduler.py
++++ b/webui/scheduler.py
+@@ -1,11 +1,15 @@
+-import asyncio
++﻿import asyncio
+ import logging
++import json
++import re
++from pathlib import Path
++from contextlib import asynccontextmanager
+ import time
+ from datetime import datetime
+ 
+ from croniter import croniter
+ 
+-from webui import demo_mode, device_location_store, settings_store, staleness, ws
++from webui import demo_mode, device_location_store, device_store, device_list_cache, locate_coalescer, settings_store, staleness, ws
+ from webui.auth_state import is_logged_in
+ from webui.deps import locate_device
+ from webui.forwarders import config_store, latest_values_store, log_store, semantic_map
+@@ -24,6 +28,8 @@ from webui.forwarders.policy import (
+ logger = logging.getLogger("webui.scheduler")
+ 
+ _tasks: dict[str, asyncio.Task] = {}
++_deleted_devices: set[str] = set()
++_device_operation_locks: dict[str, asyncio.Lock] = {}
+ 
+ _LOCATE_RETRY_ATTEMPTS = 3
+ _LOCATE_RETRY_DELAY_SECONDS = 2.0
+@@ -33,6 +39,19 @@ _consecutive_locate_failures: dict[str, int] = {}
+ _last_locate_failure_reason: dict[str, str] = {}
+ 
+ 
++async def _uncancellable_thread(func, *args):
++    """Hold the device operation lock until a started network forward is finished."""
++    task = asyncio.create_task(asyncio.to_thread(func, *args))
++    try:
++        return await asyncio.shield(task)
++    except asyncio.CancelledError:
++        try:
++            await asyncio.shield(task)
++        except Exception:
++            pass
++        raise
++
++
+ async def _locate_with_retries(canonic_id: str, name: str) -> list:
+     for _ in range(_LOCATE_RETRY_ATTEMPTS - 1):
+         try:
+@@ -134,7 +153,16 @@ async def _poll_device(canonic_id: str):
+ 
+         due_indices = [i for i, t in enumerate(next_runs) if t is not None and t <= wake_at]
+ 
+-        # name: local alias (settings.py's rows() syncs it), falls back to
++        try:
++            async with device_operation(canonic_id):
++                await _poll_device_due(canonic_id, device_cfg, due_indices)
++        except RuntimeError:
++            return
++
++
++async def _poll_device_due(canonic_id: str, device_cfg: dict, due_indices: list[int]):
++        endpoints = device_cfg.get("endpoints") or []
++        # name: local alias (settings.py's rows() syncs it), falls back to
+         # canonic_id. google_name: the account's real, fixed name, synced
+         # the same way, falls back to name. {{device_name}}/{{device_alias}}
+         # resolve to google_name/name respectively - custom.py's build_context.
+@@ -189,7 +215,7 @@ async def _poll_device(canonic_id: str):
+             for i in due_indices:
+                 url, merged = _merged_endpoint(canonic_id, endpoints[i])
+                 response_out: dict = {}
+-                status = await asyncio.to_thread(
++                status = await _uncancellable_thread(
+                     _forward_one, merged, location, google_name, name, canonic_id, device_meta,
+                     already_seen, is_most_recent, response_out,
+                 )
+@@ -244,7 +270,7 @@ async def _poll_device(canonic_id: str):
+         staleness.check_device(canonic_id, device_cfg)
+ 
+ 
+-async def forward_now(canonic_id: str, index: int) -> dict | None:
++async def _forward_now_unlocked(canonic_id: str, index: int) -> dict | None:
+     """Immediately forwards one endpoint's current location - the "send now"
+     button in the settings UI. Bypasses both its cron schedule and its
+     distance-skip threshold (via _dispatch_forward, not _forward_one) since
+@@ -278,7 +304,7 @@ async def forward_now(canonic_id: str, index: int) -> dict | None:
+     for location in locations:
+         endpoint_location = location
+         response_out: dict = {}
+-        status = await asyncio.to_thread(
++        status = await _uncancellable_thread(
+             _dispatch_forward, endpoint_cfg, endpoint_location, google_name, name, canonic_id, device_meta,
+             response_out,
+         )
+@@ -303,7 +329,24 @@ async def forward_now(canonic_id: str, index: int) -> dict | None:
+     return merged
+ 
+ 
++
++def is_device_deleted(canonic_id: str) -> bool:
++    return canonic_id in _deleted_devices
++
++
++@asynccontextmanager
++async def device_operation(canonic_id: str):
++    if is_device_deleted(canonic_id):
++        raise RuntimeError("Device deletion is in progress or complete")
++    lock = _device_operation_locks.setdefault(canonic_id, asyncio.Lock())
++    async with lock:
++        if is_device_deleted(canonic_id):
++            raise RuntimeError("Device deletion is in progress or complete")
++        yield
++
+ def restart_device(canonic_id: str):
++    if canonic_id in _deleted_devices:
++        return
+     existing = _tasks.pop(canonic_id, None)
+     if existing:
+         existing.cancel()
+@@ -340,3 +383,93 @@ def dead_tasks() -> list[str]:
+         canonic_id for canonic_id, task in _tasks.items()
+         if task.done() and not task.cancelled() and task.exception() is not None
+     ]
++
++
++async def prepare_device_deletion(canonic_id: str):
++    """Fence new work, stop scheduler/locate work, then hold the device lock."""
++    _deleted_devices.add(canonic_id)
++    task = _tasks.pop(canonic_id, None)
++    if task is not None:
++        task.cancel()
++        try:
++            await task
++        except asyncio.CancelledError:
++            pass
++    await locate_coalescer.locate_coalescer.cancel(canonic_id)
++    lock = _device_operation_locks.setdefault(canonic_id, asyncio.Lock())
++    await lock.acquire()
++    try:
++        entry = device_store.load()["devices"].get(canonic_id)
++        if not isinstance(entry, dict):
++            raise LookupError("Collector device state does not exist")
++        logs = log_store.device_entries(canonic_id)
++        return {"device_state": entry, "forward_logs": logs}, lock
++    except Exception:
++        lock.release()
++        _deleted_devices.discard(canonic_id)
++        raise
++
++
++def commit_prepared_device_deletion(canonic_id: str, lock: asyncio.Lock):
++    """Remove all persistent state while the selected device remains fenced."""
++    logs_before = log_store.device_entries(canonic_id)
++    state = device_store.delete_device(canonic_id)
++    if state is None:
++        raise RuntimeError("Collector device state disappeared during deletion")
++    if canonic_id in device_store.load().get("devices", {}):
++        raise RuntimeError("Collector device state remained after deletion")
++    _clear_locate_failure(canonic_id)
++    expected_logs = sum(len(logs_before.get(key, [])) for key in ("active", "legacy"))
++    removed_logs = log_store.remove_device(canonic_id)
++    if removed_logs != expected_logs:
++        raise RuntimeError("Collector forwarding history cleanup was incomplete")
++    device_list_cache.device_list_cache.invalidate()
++    return {"device_state": state, "forward_logs": log_store.device_entries(canonic_id)}
++
++
++def restore_device_state(canonic_id: str, entry: dict):
++    """Compensate a failed tracker-side transaction from its verified checkpoint."""
++    if not isinstance(entry, dict):
++        raise ValueError("Device recovery entry is invalid")
++    state = entry.get("device_state", entry)
++    if not isinstance(state, dict):
++        raise ValueError("Device recovery state is invalid")
++    device_store.mutate_device(canonic_id, lambda current: current.update(state))
++    if isinstance(entry.get("forward_logs"), dict):
++        log_store.restore_device(canonic_id, entry["forward_logs"])
++    _deleted_devices.discard(canonic_id)
++    device_list_cache.device_list_cache.invalidate()
++    restart_device(canonic_id)
++
++
++def revive_device(canonic_id: str):
++    """Clear in-memory delete fencing only after successful Google rediscovery."""
++    _deleted_devices.discard(canonic_id)
++    device_list_cache.device_list_cache.invalidate()
++    restart_device(canonic_id)
++
++
++async def forward_now(canonic_id: str, index: int) -> dict | None:
++    try:
++        async with device_operation(canonic_id):
++            return await _forward_now_unlocked(canonic_id, index)
++    except RuntimeError:
++        return None
++
++
++def load_pending_deletions():
++    """Fence collector IDs with durable journals after a container restart."""
++    root = device_store.config.DATA_DIR / ".findhub-device-deletion"
++    if not root.exists():
++        return
++    if root.is_symlink() or not root.is_dir() or root.stat().st_mode & 0o077:
++        raise RuntimeError("Pending deletion journal directory permissions are unsafe")
++    for path in root.glob("*.json"):
++        if path.is_symlink() or path.stat().st_mode & 0o077:
++            raise RuntimeError("Pending deletion journal permissions are unsafe")
++        with path.open(encoding="utf-8") as stream:
++            record = json.load(stream)
++        device = record.get("device_id")
++        if not isinstance(device, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", device):
++            raise RuntimeError("Pending deletion journal identity is invalid")
++        _deleted_devices.add(device)
+diff --git a/webui/staleness.py b/webui/staleness.py
+index 05eec7c..8c2ad3e 100644
+--- a/webui/staleness.py
++++ b/webui/staleness.py
+@@ -262,7 +262,19 @@ async def sweep_loop():
+     from webui/main.py's lifespan alongside scheduler.start_all()."""
+     while True:
+         try:
+-            sweep_once()
++            now = time.time()
++            devices = config_store.all_devices()
++            from webui import scheduler
++            for canonic_id, device_cfg in devices.items():
++                if device_cfg.get("endpoints"):
++                    continue
++                try:
++                    async with scheduler.device_operation(canonic_id):
++                        check_device(canonic_id, device_cfg, now=now)
++                except RuntimeError:
++                    # A deletion has fenced this device; it must not be
++                    # recreated by a late staleness-state write.
++                    continue
+         except Exception:
+             logger.exception("Staleness sweep failed")
+         await asyncio.sleep(max(60, config.STALENESS_SWEEP_INTERVAL_S))
+diff --git a/webui/yaml_io.py b/webui/yaml_io.py
+index 700f17c..e77e8b7 100644
+--- a/webui/yaml_io.py
++++ b/webui/yaml_io.py
+@@ -5,6 +5,7 @@ implementation instead of four near-identical copies, and atomic writes.
+ """
+ 
+ from pathlib import Path
++import os
+ 
+ import yaml
+ 
+@@ -32,6 +33,10 @@ def write_yaml_dict(path: Path, data: dict) -> None:
+     truncated/corrupt file behind."""
+     path.parent.mkdir(parents=True, exist_ok=True)
+     tmp = path.with_suffix(path.suffix + ".tmp")
+-    with tmp.open("w") as f:
++    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
++    with os.fdopen(fd, "w", encoding="utf-8") as f:
+         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
++        f.flush()
++        os.fsync(f.fileno())
+     tmp.replace(path)
++    os.chmod(path, 0o600)

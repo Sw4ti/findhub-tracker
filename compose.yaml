@@ -1,0 +1,181 @@
+name: ${COMPOSE_PROJECT_NAME:-findhub-tracker-friend}
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: tracker
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Run setup.ps1 or setup.sh first}
+    volumes:
+      - database:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d tracker"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    logging: &logging
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.portable
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD}
+      DASHBOARD_PASSWORD_HASH_FILE: /run/secrets/dashboard_password_hash
+      SESSION_KEY: ${SESSION_KEY}
+      INGEST_KEY: ${INGEST_KEY}
+      OWNER_ACTOR: ${OWNER_ACTOR:-owner}
+      DEMO_MODE: ${DEMO_MODE:-0}
+      SECURE_COOKIE: ${SECURE_COOKIE:-0}
+      TRUSTED_PROXY_IPS: ""
+      POLL_SECONDS: ${POLL_SECONDS:-600}
+      DISPLAY_TZ: ${DISPLAY_TZ:-UTC}
+      DISCOVERY_URL: http://device-discovery:8090
+    volumes:
+      - dashboard_auth:/run/secrets:ro
+      - collector_status:/status:ro
+      - device_checkpoints:/device-deletion-backups:rw
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
+    networks: [dashboard, database, proxy]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import urllib.request; assert Path('/run/secrets/dashboard_password_hash').is_file(); urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+      start_period: 15s
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    stop_grace_period: 20s
+    mem_limit: 512m
+    cpus: 0.75
+    logging: *logging
+
+  collector:
+    build:
+      context: .
+      dockerfile: deploy/collector.Dockerfile
+    environment:
+      HTTP_USER: tracker
+      HTTP_PASSWORD: ${COLLECTOR_PASSWORD}
+      SECRETS_ENCRYPTION_KEY: ${COLLECTOR_KEY}
+      FINDHUB_DELETION_TOKEN: ${INGEST_KEY}
+      GFMT_DATA_DIR: /data
+      # Privacy-preserving default. See CONFIGURATION.md before enabling uploads.
+      EID_UPLOAD: ${EID_UPLOAD:-off}
+      TZ: ${DISPLAY_TZ:-UTC}
+    volumes:
+      - collector:/data
+    ports:
+      - "127.0.0.1:${COLLECTOR_PORT:-4321}:4321"
+    networks: [dashboard, collector_egress]
+    shm_size: 512m
+    tmpfs: ["/run/gfmt-browser:rw,exec,nosuid,size=768m"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 2g
+    cpus: 1.5
+    logging: *logging
+
+  device-discovery:
+    build:
+      context: .
+      dockerfile: Dockerfile.portable
+    command: ["uvicorn", "device_discovery:app", "--host", "0.0.0.0", "--port", "8090", "--no-access-log"]
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD}
+      INGEST_KEY: ${INGEST_KEY}
+      DELETION_BACKUP_DIR: /device-deletion-backups
+      COLLECTOR_USERNAME: tracker
+      COLLECTOR_PASSWORD: ${COLLECTOR_PASSWORD}
+      COLLECTOR_BASE_URL: http://collector:4321
+      DISCOVERY_INTERVAL: "1800"
+    volumes:
+      - device_checkpoints:/device-deletion-backups:rw
+    networks: [dashboard, database]
+    depends_on:
+      db: {condition: service_healthy}
+      collector: {condition: service_started}
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    user: "65532:65532"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    stop_grace_period: 20s
+    mem_limit: 384m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+    logging: *logging
+
+  collector-status:
+    build:
+      context: .
+      dockerfile: Dockerfile.portable
+    command: ["python", "collector_status.py"]
+    network_mode: none
+    read_only: true
+    volumes:
+      - collector:/collector:ro
+      - collector_status:/status:rw
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; assert time.time()-os.stat('/status/devices.json').st_mtime < 90"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+    logging: *logging
+
+  auth-setup:
+    build:
+      context: .
+      dockerfile: Dockerfile.portable
+    entrypoint: ["python", "/app/portable_auth_setup.py"]
+    profiles: [setup]
+    stdin_open: true
+    tty: true
+    user: "0:0"
+    volumes:
+      - dashboard_auth:/run/auth:rw
+    network_mode: none
+    restart: "no"
+    logging: *logging
+
+networks:
+  dashboard:
+    internal: true
+  database:
+    internal: true
+  proxy:
+    # The dashboard needs a bridge with host-port forwarding. Its published
+    # port is still explicitly loopback-only; collector has no membership here.
+    driver: bridge
+  collector_egress: {}
+
+volumes:
+  database: {}
+  collector: {}
+  collector_status: {}
+  dashboard_auth: {}
+  device_checkpoints: {}

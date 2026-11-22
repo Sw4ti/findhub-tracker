@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem without sharing private account data.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never include passwords, tokens, Google account data, device IDs/names, exact coordinates, screenshots of a live map, or unredacted logs.
+  - type: input
+    id: version
+    attributes:
+      label: Project version
+      placeholder: "0.1.0-rc1"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows x64 / Docker Desktop Linux containers
+        - Linux x86_64 / Docker Engine
+        - Other / unsupported
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized diagnostic output
+      description: Remove account names, device names/IDs, coordinates, tokens, passwords, and private paths.

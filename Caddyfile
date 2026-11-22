@@ -1,0 +1,16 @@
+{$TRACKER_DOMAIN} {
+	encode zstd gzip
+	header {
+		Cache-Control "no-store"
+		Referrer-Policy "strict-origin"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		-Server
+	}
+	reverse_proxy app:8080 {
+		header_up -Remote-User
+		header_up -Remote-Groups
+		header_up -Remote-Email
+		header_up -Remote-Name
+	}
+}

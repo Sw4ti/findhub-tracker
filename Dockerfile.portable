@@ -1,0 +1,19 @@
+FROM node:22-bookworm-slim AS frontend
+WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY index.html tsconfig.json vite.config.mts ./
+COPY ui ./ui
+RUN npm run build
+
+FROM python:3.12-slim
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+    && mkdir -p /device-deletion-backups \
+    && chown 65532:65532 /device-deletion-backups
+COPY --chmod=0644 tracker.py schema.sql collector_status.py device_discovery.py device_deletion.py restore_device_checkpoint.py portable_auth_setup.py ./
+COPY --from=frontend /src/dist ./dist
+USER 65532:65532
+CMD ["uvicorn", "tracker:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]

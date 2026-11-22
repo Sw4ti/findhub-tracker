@@ -1,0 +1,38 @@
+# Local secrets and runtime state
+.env
+.env.*
+!.env.example
+backups/
+logs/
+secrets/
+rollbacks/
+*.dump
+*.sqlite
+*.sqlite3
+*.db
+*.tar.gz
+*.zip
+
+# Collector account state
+auth.yaml
+devices.yaml
+
+# Build and test output
+node_modules/
+dist/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage/
+.venv/
+.venv*/
+venv/
+qa-artifacts/
+release-candidates/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

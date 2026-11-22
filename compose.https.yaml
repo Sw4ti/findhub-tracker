@@ -1,0 +1,31 @@
+services:
+  app:
+    environment:
+      SECURE_COOKIE: "1"
+
+  caddy:
+    image: caddy:2.10-alpine
+    profiles: [https]
+    environment:
+      TRACKER_DOMAIN: ${TRACKER_DOMAIN:?Set TRACKER_DOMAIN before enabling HTTPS}
+    ports:
+      - "${HTTPS_BIND_IP:-127.0.0.1}:${HTTP_PORT:-80}:80"
+      - "${HTTPS_BIND_IP:-127.0.0.1}:${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [proxy, caddy_egress]
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}
+
+networks:
+  caddy_egress: {}

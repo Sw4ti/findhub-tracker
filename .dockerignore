@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+backups/
+**/backups/
+**/*.zip
+**/*.dump
+**/*.tar.gz
+**/devices.yaml
+**/auth.yaml
+**/secrets/
+node_modules/
+dist/
+__pycache__/
+qa-artifacts/
+release-candidates/
